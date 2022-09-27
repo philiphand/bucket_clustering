@@ -9,6 +9,7 @@ import {
     useWatchable,
 } from '@airtable/blocks/ui';
 import React, {useState} from 'react';
+import clustering from 'density-clustering';
 
 // These values match the recommended template for this example app.
 // You can also change them to match your own base, or add Table/FieldPickers to allow the
@@ -46,7 +47,7 @@ function UpdateRecordsApp() {
 
     return (
         <Container>
-            <UpdateSelectedRecordsButton
+            <ClusterParticipantsButton
                 tableToUpdate={tableToUpdate}
                 fieldToUpdate={numberField}
                 selectedRecordIds={cursor.selectedRecordIds}
@@ -73,7 +74,7 @@ function Container({children}) {
     );
 }
 
-function UpdateSelectedRecordsButton({tableToUpdate, fieldToUpdate, selectedRecordIds}) {
+function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecordIds}) {
     // Triggers a re-render if records values change. This makes sure the record values are
     // up to date when calculating their new values.
     const records = useRecords(tableToUpdate);
@@ -86,9 +87,31 @@ function UpdateSelectedRecordsButton({tableToUpdate, fieldToUpdate, selectedReco
         careerLevel: "fldojIliqwt7tIJjl",
         mlSkill: "fldzeemMfoKHIjoZp"
     }
+    console.log(fieldIdNameMap); // Temporary
 
     console.log(records);
     console.log(records[0]._data.cellValuesByFieldId);
+
+    // Start of clustering algorithm
+    let dataset = [];
+
+    records.forEach(participant => {
+        let participantData = participant._data.cellValuesByFieldId
+        dataset.push([
+            participantData[fieldIdNameMap.careerLevel],
+            participantData[fieldIdNameMap.mlSkill]
+        ])
+    })
+
+    const numberOfParticipants = dataset.length;
+    const numberOfClusters = Math.ceil(numberOfParticipants/50)
+    console.log(dataset)
+       
+    let kmeans = new clustering.KMEANS();
+    // parameters: 3 - number of clusters
+    let clusters = kmeans.run(dataset, numberOfClusters);
+    console.log(clusters);
+    // End of clustering algorithm
 
     // Track whether we're currently in the middle of performing an update.
     // We use this to disable the button during an update.
@@ -137,6 +160,9 @@ function UpdateSelectedRecordsButton({tableToUpdate, fieldToUpdate, selectedReco
 
     return (
         <div>
+            <strong>Participants without bucket:</strong><span> {numberOfParticipants}</span>
+            <br />
+            <br />
             <Button
                 variant="primary"
                 onClick={async function() {
