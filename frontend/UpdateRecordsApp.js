@@ -7,6 +7,7 @@ import {
     useLoadable,
     useRecords,
     useWatchable,
+    Input
 } from '@airtable/blocks/ui';
 import React, { useState, useEffect } from 'react';
 import clustering from 'density-clustering';
@@ -89,6 +90,7 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
     const [generatedBuckets, setGeneratedBuckets] = useState([]);
     const [bucketStatistics, setBucketStatistics] = useState([]);
     const [clusteringRuns, setClusteringRuns] = useState(0);
+    const [goalBucketSize, setGoalBucketSize] = useState(50);
     const [updatingRecords, setUpdatingRecords] = useState(false);
 
     const numberOfParticipants = records.length;
@@ -105,13 +107,14 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
             ])
         })
 
-        const maxBucketSize = 50;
+        const maxBucketSize = goalBucketSize < 25 ? 25 : goalBucketSize;
         const numberOfBuckets = Math.round(dataset.length/maxBucketSize)
         
         let kmeans = new clustering.KMEANS();
 
         // Returns an array of arrays divided into clusters with the id's of participants
         let clusters = kmeans.run(dataset, numberOfBuckets);
+        console.log(clusters)
 
         // Create buckets of ~50 matched participants containing the participant ID's
         let buckets = [[]];
@@ -138,11 +141,13 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
 
         // Sort the clusters based on avgMlSkill + avgCareerLevel of each cluster
         // This is to prevent vastly different clusters from being merged into the same bucket later
+        //clusterStatistics.sort((a, b) => (distance([parseFloat(a.clusterAvgMlSkill), parseFloat(a.clusterAvgCareerLevel)], [0,0]) - distance([parseFloat(b.clusterAvgMlSkill), parseFloat(b.clusterAvgCareerLevel)], [0,0])));
         clusterStatistics.sort((a, b) => (parseFloat(a.clusterAvgMlSkill)+parseFloat(a.clusterAvgCareerLevel)) - (parseFloat(b.clusterAvgMlSkill)+parseFloat(b.clusterAvgCareerLevel)));
         let sortedClusters = [];
         for (let i = 0; i < clusterStatistics.length; i++) {
             sortedClusters[i] = clusters[clusterStatistics[i].clusterIndex]
         }
+        console.log(clusterStatistics)
 
         sortedClusters.forEach(cluster => {
             // Add participants to buckets until the max bucket size is reached
@@ -180,7 +185,7 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
         })
         setGeneratedBuckets(buckets);
         setBucketStatistics(newBucketStatistics);
-    }, [participants, clusteringRuns])
+    }, [participants, clusteringRuns, goalBucketSize])
 
     const selectedRecordIdsSet = new Set(selectedRecordIds);
     const recordsToUpdate = records.filter(record => selectedRecordIdsSet.has(record.id));
@@ -203,6 +208,61 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
             <br />
             <br />
             {/* <strong>Selected participants:</strong><span> {selectedRecordIds.length}</span> */}
+            <strong>Goal bucket size (min. 25): </strong>
+            <Input
+                value={goalBucketSize}
+                onChange={e => {
+                    setGoalBucketSize(parseInt(e.target.value) > 0 ? parseInt(e.target.value) : 0);
+                }}
+                placeholder="Goal bucket size"
+                width="150px"
+            />
+            <br /><br />
+            <Button
+                variant="primary"
+                onClick={async function() {
+                    setClusteringRuns(clusteringRuns+1);
+                }}
+                disabled={shouldButtonBeDisabled}
+            >
+                Generate new buckets
+            </Button>
+            <br /><br />
+            <strong>Generated buckets</strong>
+            <br /> <br />
+            <table>
+                <tr>
+                    <th>Bucket</th>
+                    <th>Participants</th>
+                    <th>ML skill (avg.)</th>
+                    <th>Career level (avg.)</th>
+                    <th>ML skill (std. dev.)</th>
+                    <th>Career level (std. dev.)</th>
+                </tr>
+                {bucketStatistics.map(bucket => {
+                    return (
+                        <tr key={bucketStatistics.indexOf(bucket)}>
+                            <td>{bucketStatistics.indexOf(bucket)+1}</td>
+                            <td>{generatedBuckets[bucketStatistics.indexOf(bucket)].length}</td>
+                            {Object.entries(bucket).map(keyValue => {
+                                return <td key={keyValue[0]}>{keyValue[1]}</td>
+                            })}
+                        </tr>
+                    )
+                })}
+            </table>
+            <br /><br />
+            <Button
+                variant="primary"
+                onClick={async function() {
+                    console.log(generatedBuckets);
+                }}
+                disabled={shouldButtonBeDisabled}
+            >
+                Print buckets to browser console
+            </Button>
+            <br />
+            <br />
             <Button
                 variant="primary"
                 onClick={async function() {
@@ -228,51 +288,6 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
                 disabled={shouldButtonBeDisabled}
             >
                 Link participants to buckets
-            </Button>
-            <br />
-            <br />
-            <strong>Generated buckets</strong>
-            <br /> <br />
-            <table>
-                <tr>
-                    <th>Bucket</th>
-                    <th>Participants</th>
-                    <th>Career level (avg.)</th>
-                    <th>ML skill (avg.)</th>
-                    <th>Career level (std. dev.)</th>
-                    <th>ML skill (std. dev.)</th>
-                </tr>
-                {bucketStatistics.map(bucket => {
-                    return (
-                        <tr key={bucketStatistics.indexOf(bucket)}>
-                            <td>{bucketStatistics.indexOf(bucket)+1}</td>
-                            <td>{generatedBuckets[bucketStatistics.indexOf(bucket)].length}</td>
-                            {Object.entries(bucket).map(keyValue => {
-                                return <td key={keyValue[0]}>{keyValue[1]}</td>
-                            })}
-                        </tr>
-                    )
-                })}
-            </table>
-            <br /><br />
-            <Button
-                variant="primary"
-                onClick={async function() {
-                    setClusteringRuns(clusteringRuns+1);
-                }}
-                disabled={shouldButtonBeDisabled}
-            >
-                Generate new buckets
-            </Button>
-            <br /><br />
-            <Button
-                variant="primary"
-                onClick={async function() {
-                    console.log(generatedBuckets);
-                }}
-                disabled={shouldButtonBeDisabled}
-            >
-                Output buckets to browser console
             </Button>
             <br />
             <br />
