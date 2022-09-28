@@ -228,30 +228,6 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
                 Generate new buckets
             </Button>
             <br /><br />
-            <strong>Generated buckets</strong>
-            <br /> <br />
-            <table>
-                <tr>
-                    <th>Bucket</th>
-                    <th>Participants</th>
-                    <th>ML skill (avg.)</th>
-                    <th>Career level (avg.)</th>
-                    <th>ML skill (std. dev.)</th>
-                    <th>Career level (std. dev.)</th>
-                </tr>
-                {bucketStatistics.map(bucket => {
-                    return (
-                        <tr key={bucketStatistics.indexOf(bucket)}>
-                            <td>{bucketStatistics.indexOf(bucket)+1}</td>
-                            <td>{generatedBuckets[bucketStatistics.indexOf(bucket)].length}</td>
-                            {Object.entries(bucket).map(keyValue => {
-                                return <td key={keyValue[0]}>{keyValue[1]}</td>
-                            })}
-                        </tr>
-                    )
-                })}
-            </table>
-            <br /><br />
             <Button
                 variant="primary"
                 onClick={async function() {
@@ -291,6 +267,30 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
             </Button>
             <br />
             <br />
+            <strong>Generated buckets</strong>
+            <br /> <br />
+            <table>
+                <tr>
+                    <th>Bucket</th>
+                    <th>Participants</th>
+                    <th>ML skill (avg.)</th>
+                    <th>Career level (avg.)</th>
+                    <th>ML skill (std. dev.)</th>
+                    <th>Career level (std. dev.)</th>
+                </tr>
+                {bucketStatistics.map(bucket => {
+                    return (
+                        <tr key={bucketStatistics.indexOf(bucket)}>
+                            <td>{bucketStatistics.indexOf(bucket)+1}</td>
+                            <td>{generatedBuckets[bucketStatistics.indexOf(bucket)].length}</td>
+                            {Object.entries(bucket).map(keyValue => {
+                                return <td key={keyValue[0]}>{keyValue[1]}</td>
+                            })}
+                        </tr>
+                    )
+                })}
+            </table>
+            <br /><br />
             <strong>Danger zone</strong>
             <br /><br />
             <Button
