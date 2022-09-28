@@ -73,106 +73,114 @@ function Container({children}) {
     );
 }
 
+// Map of field ID to field name
+const fieldIdNameMap = {
+    score: "fldAoT3mVItCSfO3M",
+    name: "fldWIGdIb09I4pGXE",
+    creationDate: "fldZPrGNGWDBL7uy1",
+    careerLevel: "fldojIliqwt7tIJjl",
+    mlSkill: "fldzeemMfoKHIjoZp"
+}
+
 function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecordIds, bucketsTable}) {
     const records = useRecords(tableToUpdate);
     const bucketRecords = useRecords(bucketsTable);
-    //const [newBuckets, setNewBuckets] = useState([]);
-    //const [bucketStatistics, setBucketStatistics] = useState([]);
+    const [participants] = useState([...records]);
+    const [generatedBuckets, setGeneratedBuckets] = useState([]);
+    const [bucketStatistics, setBucketStatistics] = useState([]);
+    const [clusteringRuns, setClusteringRuns] = useState(0);
+    const [updatingRecords, setUpdatingRecords] = useState(false);
 
-    // Map of field ID to field name
-    const fieldIdNameMap = {
-        score: "fldAoT3mVItCSfO3M",
-        name: "fldWIGdIb09I4pGXE",
-        creationDate: "fldZPrGNGWDBL7uy1",
-        careerLevel: "fldojIliqwt7tIJjl",
-        mlSkill: "fldzeemMfoKHIjoZp"
-    }
+    const numberOfParticipants = records.length;
 
-    // Start of clustering algorithm
-    let dataset = [];
+    useEffect(() => {
+        // Start of clustering algorithm
+        let dataset = [];
 
-    records.forEach(participant => {
-        let participantData = participant._data.cellValuesByFieldId
-        dataset.push([
-            participantData[fieldIdNameMap.careerLevel],
-            participantData[fieldIdNameMap.mlSkill]
-        ])
-    })
-
-    const maxBucketSize = 50;
-    const numberOfParticipants = dataset.length;
-    const numberOfBuckets = Math.round(numberOfParticipants/maxBucketSize)
-       
-    let kmeans = new clustering.KMEANS();
-
-    // Returns an array of arrays divided into clusters with the id's of participants
-    let clusters = kmeans.run(dataset, numberOfBuckets);
-
-    // Create buckets of ~50 matched participants containing the participant ID's
-    let buckets = [[]];
-    let currentBucket = 0;
-    let fittedBucketSize = Math.ceil(numberOfParticipants/numberOfBuckets);
-    let clusterStatistics = [];
-    clusters.forEach(cluster => {
-        let clusterMlSkills = []
-        let clusterCareerLevels = []
-
-        // Calculate statistics for each cluster
-        cluster.forEach(participant => {
-            let participantFields = records[parseInt(participant)]._data.cellValuesByFieldId
-            clusterMlSkills.push(participantFields[fieldIdNameMap.mlSkill])
-            clusterCareerLevels.push(participantFields[fieldIdNameMap.careerLevel])
+        participants.forEach(participant => {
+            let participantData = participant._data.cellValuesByFieldId
+            dataset.push([
+                participantData[fieldIdNameMap.careerLevel],
+                participantData[fieldIdNameMap.mlSkill]
+            ])
         })
-        const clusterIndex = clusters.indexOf(cluster);
-        const clusterAvgMlSkill = (clusterMlSkills.reduce((a, b) => a + b, 0) / clusterMlSkills.length).toFixed(2);
-        const clusterAvgCareerLevel = (clusterCareerLevels.reduce((a, b) => a + b, 0) / clusterCareerLevels.length).toFixed(2);
-        const clusterStdMlSkill = std(clusterMlSkills).toFixed(2);
-        const clusterStdCareerLevel = std(clusterCareerLevels).toFixed(2);
-        clusterStatistics.push({clusterIndex, clusterAvgMlSkill, clusterAvgCareerLevel, clusterStdMlSkill, clusterStdCareerLevel})
-    })
 
-    // Sort the clusters based on avgMlSkill + avgCareerLevel of each cluster
-    // This is to prevent vastly different clusters from being merged into the same bucket later
-    clusterStatistics.sort((a, b) => (parseFloat(a.clusterAvgMlSkill)+parseFloat(a.clusterAvgCareerLevel)) - (parseFloat(b.clusterAvgMlSkill)+parseFloat(b.clusterAvgCareerLevel)));
-    let sortedClusters = [];
-    for (let i = 0; i < clusterStatistics.length; i++) {
-        sortedClusters[i] = clusters[clusterStatistics[i].clusterIndex]
-    }
+        const maxBucketSize = 50;
+        const numberOfBuckets = Math.round(dataset.length/maxBucketSize)
+        
+        let kmeans = new clustering.KMEANS();
 
-    sortedClusters.forEach(cluster => {
-        // Add participants to buckets until the max bucket size is reached
-        cluster.forEach(participant => {
-            if (buckets[currentBucket].length >= fittedBucketSize) {
-                currentBucket += 1
-                buckets[currentBucket] = []
-            }
-            const participantFields = records[parseInt(participant)]._data.cellValuesByFieldId
-            const participantID = records[parseInt(participant)].id
-            buckets[currentBucket].push({
-                id: participantID,
-                name: participantFields[fieldIdNameMap.name],
-                mlSkill: participantFields[fieldIdNameMap.mlSkill],
-                careerLevel: participantFields[fieldIdNameMap.careerLevel]
+        // Returns an array of arrays divided into clusters with the id's of participants
+        let clusters = kmeans.run(dataset, numberOfBuckets);
+
+        // Create buckets of ~50 matched participants containing the participant ID's
+        let buckets = [[]];
+        let currentBucket = 0;
+        let fittedBucketSize = Math.ceil(dataset.length/numberOfBuckets);
+        let clusterStatistics = [];
+        clusters.forEach(cluster => {
+            let clusterMlSkills = []
+            let clusterCareerLevels = []
+
+            // Calculate statistics for each cluster
+            cluster.forEach(participant => {
+                let participantFields = participants[parseInt(participant)]._data.cellValuesByFieldId
+                clusterMlSkills.push(participantFields[fieldIdNameMap.mlSkill])
+                clusterCareerLevels.push(participantFields[fieldIdNameMap.careerLevel])
+            })
+            const clusterIndex = clusters.indexOf(cluster);
+            const clusterAvgMlSkill = (clusterMlSkills.reduce((a, b) => a + b, 0) / clusterMlSkills.length).toFixed(2);
+            const clusterAvgCareerLevel = (clusterCareerLevels.reduce((a, b) => a + b, 0) / clusterCareerLevels.length).toFixed(2);
+            const clusterStdMlSkill = std(clusterMlSkills).toFixed(2);
+            const clusterStdCareerLevel = std(clusterCareerLevels).toFixed(2);
+            clusterStatistics.push({clusterIndex, clusterAvgMlSkill, clusterAvgCareerLevel, clusterStdMlSkill, clusterStdCareerLevel})
+        })
+
+        // Sort the clusters based on avgMlSkill + avgCareerLevel of each cluster
+        // This is to prevent vastly different clusters from being merged into the same bucket later
+        clusterStatistics.sort((a, b) => (parseFloat(a.clusterAvgMlSkill)+parseFloat(a.clusterAvgCareerLevel)) - (parseFloat(b.clusterAvgMlSkill)+parseFloat(b.clusterAvgCareerLevel)));
+        let sortedClusters = [];
+        for (let i = 0; i < clusterStatistics.length; i++) {
+            sortedClusters[i] = clusters[clusterStatistics[i].clusterIndex]
+        }
+
+        sortedClusters.forEach(cluster => {
+            // Add participants to buckets until the max bucket size is reached
+            cluster.forEach(participant => {
+                if (buckets[currentBucket].length >= fittedBucketSize) {
+                    currentBucket += 1
+                    buckets[currentBucket] = []
+                }
+                const participantFields = participants[parseInt(participant)]._data.cellValuesByFieldId
+                const participantID = participants[parseInt(participant)].id
+                buckets[currentBucket].push({
+                    id: participantID,
+                    name: participantFields[fieldIdNameMap.name],
+                    mlSkill: participantFields[fieldIdNameMap.mlSkill],
+                    careerLevel: participantFields[fieldIdNameMap.careerLevel]
+                })
             })
         })
-    })
-    // End of clustering algorithm
+        // End of clustering algorithm
 
-    // Bucket statistics
-    let bucketStatistics = []
-    buckets.forEach(bucket => {
-        let bucketMlSkills = []
-        let bucketCareerLevels = []
-        bucket.forEach(participant => {
-            bucketMlSkills.push(participant.mlSkill)
-            bucketCareerLevels.push(participant.careerLevel)
+        // Bucket statistics
+        let newBucketStatistics = []
+        buckets.forEach(bucket => {
+            let bucketMlSkills = []
+            let bucketCareerLevels = []
+            bucket.forEach(participant => {
+                bucketMlSkills.push(participant.mlSkill)
+                bucketCareerLevels.push(participant.careerLevel)
+            })
+            const bucketAvgMlSkill = (bucketMlSkills.reduce((a, b) => a + b, 0) / bucketMlSkills.length).toFixed(2);
+            const bucketAvgCareerLevel = (bucketCareerLevels.reduce((a, b) => a + b, 0) / bucketCareerLevels.length).toFixed(2);
+            const bucketStdMlSkill = std(bucketMlSkills).toFixed(2);
+            const bucketStdCareerLevel = std(bucketCareerLevels).toFixed(2);
+            newBucketStatistics.push({bucketAvgMlSkill, bucketAvgCareerLevel, bucketStdMlSkill, bucketStdCareerLevel})
         })
-        const bucketAvgMlSkill = (bucketMlSkills.reduce((a, b) => a + b, 0) / bucketMlSkills.length).toFixed(2);
-        const bucketAvgCareerLevel = (bucketCareerLevels.reduce((a, b) => a + b, 0) / bucketCareerLevels.length).toFixed(2);
-        const bucketStdMlSkill = std(bucketMlSkills).toFixed(2);
-        const bucketStdCareerLevel = std(bucketCareerLevels).toFixed(2);
-        bucketStatistics.push({bucketAvgMlSkill, bucketAvgCareerLevel, bucketStdMlSkill, bucketStdCareerLevel})
-    })
+        setGeneratedBuckets(buckets);
+        setBucketStatistics(newBucketStatistics);
+    }, [participants, clusteringRuns])
 
     const selectedRecordIdsSet = new Set(selectedRecordIds);
     const recordsToUpdate = records.filter(record => selectedRecordIdsSet.has(record.id));
@@ -187,22 +195,23 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
         },
     }));
 
-    const shouldButtonBeDisabled = !tableToUpdate.hasPermissionToUpdateRecords(updates);
+    const shouldButtonBeDisabled = !tableToUpdate.hasPermissionToUpdateRecords(updates) || updatingRecords;
 
     return (
         <div>
-            <strong>Participants without bucket:</strong><span> {numberOfParticipants}</span>
+            <strong>Total participants:</strong><span> {numberOfParticipants}</span>
             <br />
             <br />
             {/* <strong>Selected participants:</strong><span> {selectedRecordIds.length}</span> */}
             <Button
                 variant="primary"
                 onClick={async function() {
+                    setUpdatingRecords(true);
                     let newBucketId = bucketRecords.length;
-                    for (let i = 0; i < buckets.length; i++) {
+                    for (let i = 0; i < generatedBuckets.length; i++) {
                         newBucketId += 1;
                         await bucketsTable.createRecordAsync({"Name": `Bucket ${newBucketId}`});
-                        const participants = buckets[i]
+                        const participants = generatedBuckets[i]
                         let participantsToLink = []
                         for (let z = 0; z < participants.length; z++) {
                             const id = participants[z].id
@@ -214,6 +223,7 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
                             'Participants': participantsToLink
                         });
                     }
+                    setUpdatingRecords(false);
                 }}
                 disabled={shouldButtonBeDisabled}
             >
@@ -227,16 +237,16 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
                 <tr>
                     <th>Bucket</th>
                     <th>Participants</th>
-                    <th>Avg. career level</th>
-                    <th>Avg. ML skill</th>
-                    <th>Std. dev. career level</th>
-                    <th>Std. dev. ML skill</th>
+                    <th>Career level (avg.)</th>
+                    <th>ML skill (avg.)</th>
+                    <th>Career level (std. dev.)</th>
+                    <th>ML skill (std. dev.)</th>
                 </tr>
                 {bucketStatistics.map(bucket => {
                     return (
                         <tr key={bucketStatistics.indexOf(bucket)}>
                             <td>{bucketStatistics.indexOf(bucket)+1}</td>
-                            <td>{buckets[bucketStatistics.indexOf(bucket)].length}</td>
+                            <td>{generatedBuckets[bucketStatistics.indexOf(bucket)].length}</td>
                             {Object.entries(bucket).map(keyValue => {
                                 return <td key={keyValue[0]}>{keyValue[1]}</td>
                             })}
@@ -244,23 +254,44 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
                     )
                 })}
             </table>
+            <br /><br />
+            <Button
+                variant="primary"
+                onClick={async function() {
+                    setClusteringRuns(clusteringRuns+1);
+                }}
+                disabled={shouldButtonBeDisabled}
+            >
+                Generate new buckets
+            </Button>
+            <br /><br />
+            <Button
+                variant="primary"
+                onClick={async function() {
+                    console.log(generatedBuckets);
+                }}
+                disabled={shouldButtonBeDisabled}
+            >
+                Output buckets to browser console
+            </Button>
             <br />
             <br />
+            <strong>Danger zone</strong>
+            <br /><br />
             <Button
                 variant="danger"
                 onClick={async function() {
+                    setUpdatingRecords(true);
                     const bucketRecordsQuery = await bucketsTable.selectRecordsAsync({fields: bucketsTable.fields});
                     const bucketRecords = bucketRecordsQuery.records;
                     for (let i = 0; i < bucketRecords.length; i++) {
                         await bucketsTable.updateRecordAsync(bucketRecords[i], {
                             'Participants': []
                         });
-                        // tableToUpdate.updateRecordAsync(records[0], {
-                        //     'Bucket': [
-                        //     ]
-                        // });
                     }
+                    setUpdatingRecords(false);
                 }}
+                disabled={shouldButtonBeDisabled}
             >
                 Unlink all buckets
             </Button>
