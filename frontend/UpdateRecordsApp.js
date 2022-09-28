@@ -8,8 +8,10 @@ import {
     useRecords,
     useWatchable,
 } from '@airtable/blocks/ui';
-import React, {useState} from 'react';
+import React from 'react';
 import clustering from 'density-clustering';
+import { std } from 'mathjs';
+import "./style.css";
 
 // These values match the recommended template for this example app.
 // You can also change them to match your own base, or add Table/FieldPickers to allow the
@@ -17,15 +19,12 @@ import clustering from 'density-clustering';
 const TABLE_NAME = 'Participants';
 const FIELD_NAME = 'Bucket';
 
-// Airtable SDK limit: we can only update 50 records at a time. For more details, see
-// https://github.com/Airtable/blocks/tree/blob/packages/sdk/docs/guide_writes.md#size-limits-rate-limits
-const MAX_RECORDS_PER_UPDATE = 50;
-
 function UpdateRecordsApp() {
     const base = useBase();
     const cursor = useCursor();
 
     const tableToUpdate = base.getTableByName(TABLE_NAME);
+    const bucketsTable = base.getTableByName("Buckets");
 
     const numberField = tableToUpdate.getFieldByName(FIELD_NAME);
 
@@ -51,12 +50,12 @@ function UpdateRecordsApp() {
                 tableToUpdate={tableToUpdate}
                 fieldToUpdate={numberField}
                 selectedRecordIds={cursor.selectedRecordIds}
+                bucketsTable={bucketsTable}
             />
         </Container>
     );
 }
 
-// Container element which centers its children.
 function Container({children}) {
     return (
         <Box
@@ -74,10 +73,9 @@ function Container({children}) {
     );
 }
 
-function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecordIds}) {
-    // Triggers a re-render if records values change. This makes sure the record values are
-    // up to date when calculating their new values.
+function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecordIds, bucketsTable}) {
     const records = useRecords(tableToUpdate);
+    const bucketRecords = useRecords(bucketsTable);
 
     // Map of field ID to field name
     const fieldIdNameMap = {
@@ -87,10 +85,6 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
         careerLevel: "fldojIliqwt7tIJjl",
         mlSkill: "fldzeemMfoKHIjoZp"
     }
-    console.log(fieldIdNameMap); // Temporary
-
-    console.log(records);
-    console.log(records[0]._data.cellValuesByFieldId);
 
     // Start of clustering algorithm
     let dataset = [];
@@ -103,38 +97,80 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
         ])
     })
 
+    const maxBucketSize = 50;
     const numberOfParticipants = dataset.length;
-    const numberOfClusters = Math.ceil(numberOfParticipants/50)
-    console.log(dataset)
+    const numberOfBuckets = Math.round(numberOfParticipants/maxBucketSize)
        
     let kmeans = new clustering.KMEANS();
-    // parameters: 3 - number of clusters
-    let clusters = kmeans.run(dataset, numberOfClusters);
-    console.log(clusters);
-    // End of clustering algorithm
 
-    // Track whether we're currently in the middle of performing an update.
-    // We use this to disable the button during an update.
-    // We also use this to show the correct number of records being updated on
-    // the button: when the update starts, we store the number here. If the user
-    // changes their selected records during the update, the number shown on the
-    // button will remain accurate.
-    const [numRecordsBeingUpdated, setNumRecordsBeingUpdated] = useState(null);
+    // Returns an array of arrays divided into clusters with the id's of participants
+    let clusters = kmeans.run(dataset, numberOfBuckets);
 
-    const isUpdateInProgress = numRecordsBeingUpdated !== null;
+    // Create buckets of ~50 matched participants containing the participant ID's
+    let buckets = [[]];
+    let currentBucket = 0;
+    let fittedBucketSize = Math.ceil(numberOfParticipants/numberOfBuckets);
+    let clusterStatistics = [];
+    clusters.forEach(cluster => {
+        let clusterMlSkills = []
+        let clusterCareerLevels = []
 
-    let buttonText;
-    const recordsText = `record${selectedRecordIds.length === 1 ? '' : 's'}`;
-    if (isUpdateInProgress) {
-        buttonText = `Updating ${numRecordsBeingUpdated} ${recordsText}`;
-    } else {
-        buttonText = `Click to update ${selectedRecordIds.length} ${recordsText}!`;
+        // Calculate statistics for each cluster
+        cluster.forEach(participant => {
+            let participantFields = records[parseInt(participant)]._data.cellValuesByFieldId
+            clusterMlSkills.push(participantFields[fieldIdNameMap.mlSkill])
+            clusterCareerLevels.push(participantFields[fieldIdNameMap.careerLevel])
+        })
+        const clusterIndex = clusters.indexOf(cluster);
+        const clusterAvgMlSkill = (clusterMlSkills.reduce((a, b) => a + b, 0) / clusterMlSkills.length).toFixed(2);
+        const clusterAvgCareerLevel = (clusterCareerLevels.reduce((a, b) => a + b, 0) / clusterCareerLevels.length).toFixed(2);
+        const clusterStdMlSkill = std(clusterMlSkills).toFixed(2);
+        const clusterStdCareerLevel = std(clusterCareerLevels).toFixed(2);
+        clusterStatistics.push({clusterIndex, clusterAvgMlSkill, clusterAvgCareerLevel, clusterStdMlSkill, clusterStdCareerLevel})
+    })
+    clusterStatistics.sort((a, b) => (parseFloat(a.clusterAvgMlSkill)+parseFloat(a.clusterAvgCareerLevel)) - (parseFloat(b.clusterAvgMlSkill)+parseFloat(b.clusterAvgCareerLevel)));
+
+    let sortedClusters = [];
+    for (let i = 0; i < clusterStatistics.length; i++) {
+        sortedClusters[i] = clusters[clusterStatistics[i].clusterIndex]
     }
 
-    // Prepare the updates that we are going to perform. (Required to check permissions)
-    // We need to get all of the selected records to get the current values of numberField.
-    // .filter narrows the list of all records down to just the records with id
-    // in selectedRecordIdSet.
+    sortedClusters.forEach(cluster => {
+        // Add participants to buckets until the max bucket size is reached
+        cluster.forEach(participant => {
+            if (buckets[currentBucket].length >= fittedBucketSize) {
+                currentBucket += 1
+                buckets[currentBucket] = []
+            }
+            const participantFields = records[parseInt(participant)]._data.cellValuesByFieldId
+            const participantID = records[parseInt(participant)].id
+            buckets[currentBucket].push({
+                id: participantID,
+                name: participantFields[fieldIdNameMap.name],
+                mlSkill: participantFields[fieldIdNameMap.mlSkill],
+                careerLevel: participantFields[fieldIdNameMap.careerLevel]
+            })
+        })
+    })
+    // End of clustering algorithm
+
+    // Bucket statistics
+    let bucketStatistics = []
+    buckets.forEach(bucket => {
+        let bucketMlSkills = []
+        let bucketCareerLevels = []
+        bucket.forEach(participant => {
+            bucketMlSkills.push(participant.mlSkill)
+            bucketCareerLevels.push(participant.careerLevel)
+        })
+        const bucketAvgMlSkill = (bucketMlSkills.reduce((a, b) => a + b, 0) / bucketMlSkills.length).toFixed(2);
+        const bucketAvgCareerLevel = (bucketCareerLevels.reduce((a, b) => a + b, 0) / bucketCareerLevels.length).toFixed(2);
+        const bucketStdMlSkill = std(bucketMlSkills).toFixed(2);
+        const bucketStdCareerLevel = std(bucketCareerLevels).toFixed(2);
+        bucketStatistics.push({bucketAvgMlSkill, bucketAvgCareerLevel, bucketStdMlSkill, bucketStdCareerLevel})
+    })
+    console.log(buckets)
+
     const selectedRecordIdsSet = new Set(selectedRecordIds);
     const recordsToUpdate = records.filter(record => selectedRecordIdsSet.has(record.id));
 
@@ -148,64 +184,104 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
         },
     }));
 
-    // Disable the button if any of these are true:
-    // - an update is in progress,
-    // - no records are selected,
-    // - the user doesn't have permission to perform the update.
-    // (Phew!)
-    const shouldButtonBeDisabled =
-        isUpdateInProgress ||
-        selectedRecordIds.length === 0 ||
-        !tableToUpdate.hasPermissionToUpdateRecords(updates);
+    const shouldButtonBeDisabled = !tableToUpdate.hasPermissionToUpdateRecords(updates);
 
     return (
         <div>
             <strong>Participants without bucket:</strong><span> {numberOfParticipants}</span>
             <br />
             <br />
+            {/* <strong>Selected participants:</strong><span> {selectedRecordIds.length}</span> */}
             <Button
                 variant="primary"
                 onClick={async function() {
-                    // Mark the update as started.
-                    setNumRecordsBeingUpdated(updates.length);
+                    let newBucketId = bucketRecords.length;
+                    for (let i = 0; i < buckets.length; i++) {
+                        newBucketId += 1;
+                        await bucketsTable.createRecordAsync({"Name": `Bucket ${newBucketId}`});
+                        const participants = buckets[i]
+                        for (let z = 0; z < participants.length; z++) {
+                            const id = participants[z].id
+                            const newBucketRecordsQuery = await bucketsTable.selectRecordsAsync({fields: bucketsTable.fields});
+                            const newBucketRecords = newBucketRecordsQuery.records;
+                            let linkedParticipants = [{ id: id }]
+                            if (newBucketRecords[newBucketId-1].getCellValue('Participants')) {
+                                linkedParticipants.push(...newBucketRecords[newBucketId-1].getCellValue('Participants'))
+                            }
+                            await bucketsTable.updateRecordAsync(newBucketRecords[newBucketId-1], {
+                                    'Participants': linkedParticipants
+                            });
+                        }
+                    }
 
-                    // Update the records!
-                    // await is used to wait for all of the updates to finish saving
-                    // to Airtable servers. This keeps the button disabled until the
-                    // update is finished.
-                    await updateRecordsInBatches(tableToUpdate, updates);
-
-                    // We're done! Mark the update as finished.
-                    setNumRecordsBeingUpdated(null);
+                    // bucketsTable.updateRecordAsync(bucketRecords[0], {
+                    //     'Participants': [
+                    //         { id: records[1].id}
+                    //     ]
+                    // });
                 }}
                 disabled={shouldButtonBeDisabled}
             >
-                {buttonText}
+                Cluster participants into buckets
             </Button>
-            {/* {records.map(record => {
-                return (
-                    <p key={records.indexOf(record)}>
-                        {record._data.cellValuesByFieldId[fieldIdNameMap.name]}
-                        {record._data.cellValuesByFieldId[fieldIdNameMap.careerLevel]}
-                    </p>
-                )
-            })} */}
+            <br />
+            <br />
+            <Button
+                variant="primary"
+                onClick={async function() {
+                    bucketsTable.updateRecordAsync(bucketRecords[0], {
+                        'Participants': [
+                            { id: records[1].id}
+                        ]
+                    });
+
+                    // tableToUpdate.updateRecordAsync(records[1], {
+                    //     'Bucket': [
+                    //         { id: bucketRecords[0].id}
+                    //     ]
+                    // });
+                }}
+            >
+                Test update one record
+            </Button>
+            <br />
+            <br />
+            <Button
+                variant="danger"
+                onClick={async function() {
+                    tableToUpdate.updateRecordAsync(records[0], {
+                        'Bucket': [
+                        ]
+                    });
+                }}
+            >
+                Remove linked buckets
+            </Button>
+            <br />
+            <br />
+            <table>
+                <tr>
+                    <th>Bucket ID</th>
+                    <th>Participants</th>
+                    <th>Avg. career level</th>
+                    <th>Avg. ML skill</th>
+                    <th>Std. dev. career level</th>
+                    <th>Std. dev. ML skill</th>
+                </tr>
+                {bucketStatistics.map(bucket => {
+                    return (
+                        <tr key={bucketStatistics.indexOf(bucket)}>
+                            <td>{bucketStatistics.indexOf(bucket)+1}</td>
+                            <td>{buckets[bucketStatistics.indexOf(bucket)].length}</td>
+                            {Object.entries(bucket).map(keyValue => {
+                                return <td key={keyValue[0]}>{keyValue[1]}</td>
+                            })}
+                        </tr>
+                    )
+                })}
+            </table>
         </div>
     );
-}
-
-async function updateRecordsInBatches(table, updates) {
-    // Saves the updates in batches of MAX_RECORDS_PER_UPDATE to stay under size
-    // limits.
-    let i = 0;
-    while (i < updates.length) {
-        const updateBatch = updates.slice(i, i + MAX_RECORDS_PER_UPDATE);
-        // await is used to wait for the update to finish saving to Airtable
-        // servers before continuing. This means we'll stay under the rate
-        // limit for writes.
-        await table.updateRecordsAsync(updateBatch);
-        i += MAX_RECORDS_PER_UPDATE;
-    }
 }
 
 export default UpdateRecordsApp;
