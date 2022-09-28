@@ -8,7 +8,7 @@ import {
     useRecords,
     useWatchable,
 } from '@airtable/blocks/ui';
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import clustering from 'density-clustering';
 import { std } from 'mathjs';
 import "./style.css";
@@ -76,6 +76,8 @@ function Container({children}) {
 function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecordIds, bucketsTable}) {
     const records = useRecords(tableToUpdate);
     const bucketRecords = useRecords(bucketsTable);
+    //const [newBuckets, setNewBuckets] = useState([]);
+    //const [bucketStatistics, setBucketStatistics] = useState([]);
 
     // Map of field ID to field name
     const fieldIdNameMap = {
@@ -128,8 +130,10 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
         const clusterStdCareerLevel = std(clusterCareerLevels).toFixed(2);
         clusterStatistics.push({clusterIndex, clusterAvgMlSkill, clusterAvgCareerLevel, clusterStdMlSkill, clusterStdCareerLevel})
     })
-    clusterStatistics.sort((a, b) => (parseFloat(a.clusterAvgMlSkill)+parseFloat(a.clusterAvgCareerLevel)) - (parseFloat(b.clusterAvgMlSkill)+parseFloat(b.clusterAvgCareerLevel)));
 
+    // Sort the clusters based on avgMlSkill + avgCareerLevel of each cluster
+    // This is to prevent vastly different clusters from being merged into the same bucket later
+    clusterStatistics.sort((a, b) => (parseFloat(a.clusterAvgMlSkill)+parseFloat(a.clusterAvgCareerLevel)) - (parseFloat(b.clusterAvgMlSkill)+parseFloat(b.clusterAvgCareerLevel)));
     let sortedClusters = [];
     for (let i = 0; i < clusterStatistics.length; i++) {
         sortedClusters[i] = clusters[clusterStatistics[i].clusterIndex]
@@ -169,7 +173,6 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
         const bucketStdCareerLevel = std(bucketCareerLevels).toFixed(2);
         bucketStatistics.push({bucketAvgMlSkill, bucketAvgCareerLevel, bucketStdMlSkill, bucketStdCareerLevel})
     })
-    console.log(buckets)
 
     const selectedRecordIdsSet = new Set(selectedRecordIds);
     const recordsToUpdate = records.filter(record => selectedRecordIdsSet.has(record.id));
@@ -200,68 +203,29 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
                         newBucketId += 1;
                         await bucketsTable.createRecordAsync({"Name": `Bucket ${newBucketId}`});
                         const participants = buckets[i]
+                        let participantsToLink = []
                         for (let z = 0; z < participants.length; z++) {
                             const id = participants[z].id
-                            const newBucketRecordsQuery = await bucketsTable.selectRecordsAsync({fields: bucketsTable.fields});
-                            const newBucketRecords = newBucketRecordsQuery.records;
-                            let linkedParticipants = [{ id: id }]
-                            if (newBucketRecords[newBucketId-1].getCellValue('Participants')) {
-                                linkedParticipants.push(...newBucketRecords[newBucketId-1].getCellValue('Participants'))
-                            }
-                            await bucketsTable.updateRecordAsync(newBucketRecords[newBucketId-1], {
-                                    'Participants': linkedParticipants
-                            });
+                            participantsToLink.push({id})
                         }
+                        const newBucketRecordsQuery = await bucketsTable.selectRecordsAsync({fields: bucketsTable.fields});
+                        const newBucketRecords = newBucketRecordsQuery.records;
+                        await bucketsTable.updateRecordAsync(newBucketRecords[newBucketId-1], {
+                            'Participants': participantsToLink
+                        });
                     }
-
-                    // bucketsTable.updateRecordAsync(bucketRecords[0], {
-                    //     'Participants': [
-                    //         { id: records[1].id}
-                    //     ]
-                    // });
                 }}
                 disabled={shouldButtonBeDisabled}
             >
-                Cluster participants into buckets
+                Link participants to buckets
             </Button>
             <br />
             <br />
-            <Button
-                variant="primary"
-                onClick={async function() {
-                    bucketsTable.updateRecordAsync(bucketRecords[0], {
-                        'Participants': [
-                            { id: records[1].id}
-                        ]
-                    });
-
-                    // tableToUpdate.updateRecordAsync(records[1], {
-                    //     'Bucket': [
-                    //         { id: bucketRecords[0].id}
-                    //     ]
-                    // });
-                }}
-            >
-                Test update one record
-            </Button>
-            <br />
-            <br />
-            <Button
-                variant="danger"
-                onClick={async function() {
-                    tableToUpdate.updateRecordAsync(records[0], {
-                        'Bucket': [
-                        ]
-                    });
-                }}
-            >
-                Remove linked buckets
-            </Button>
-            <br />
-            <br />
+            <strong>Generated buckets</strong>
+            <br /> <br />
             <table>
                 <tr>
-                    <th>Bucket ID</th>
+                    <th>Bucket</th>
                     <th>Participants</th>
                     <th>Avg. career level</th>
                     <th>Avg. ML skill</th>
@@ -280,6 +244,26 @@ function ClusterParticipantsButton({tableToUpdate, fieldToUpdate, selectedRecord
                     )
                 })}
             </table>
+            <br />
+            <br />
+            <Button
+                variant="danger"
+                onClick={async function() {
+                    const bucketRecordsQuery = await bucketsTable.selectRecordsAsync({fields: bucketsTable.fields});
+                    const bucketRecords = bucketRecordsQuery.records;
+                    for (let i = 0; i < bucketRecords.length; i++) {
+                        await bucketsTable.updateRecordAsync(bucketRecords[i], {
+                            'Participants': []
+                        });
+                        // tableToUpdate.updateRecordAsync(records[0], {
+                        //     'Bucket': [
+                        //     ]
+                        // });
+                    }
+                }}
+            >
+                Unlink all buckets
+            </Button>
         </div>
     );
 }
